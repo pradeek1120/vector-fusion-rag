@@ -1,263 +1,198 @@
-# Production Hybrid RAG System
+## Production Hybrid RAG System
 
-A production-grade Retrieval-Augmented Generation (RAG) system combining **dense vector search**, **sparse BM25 search**, **Reciprocal Rank Fusion**, and **cross-encoder reranking** — the architecture used at companies like Cohere, Vespa, and Elastic.
+This project is a **production‑ready Retrieval‑Augmented Generation (RAG) system** that I built end‑to‑end.  
+It combines dense vector search, sparse BM25 search, reciprocal rank fusion, and cross‑encoder reranking, exposed
+through a FastAPI service with caching, monitoring, and evaluation tooling.
 
----
+You can link this repository directly from a resume or portfolio as:
 
-## Architecture
-
-```
-User Query
-    │
-    ▼
-Query Router (LangGraph)
-    │ route = "rag"
-    ▼
-HyDE Expansion ──────────────────────────┐
-    │                                     │
-    ▼                                     ▼
-Dense Search (Qdrant)         Sparse BM25 Search (Qdrant)
-BAAI/bge-base-en-v1.5         TF-weighted sparse vectors
-top-20 results                top-20 results
-    │                                     │
-    └──────────────┬──────────────────────┘
-                   ▼
-        RRF Score Fusion (k=60)
-        weighted merge by rank
-                   │
-                   ▼
-        Cross-encoder Reranker
-        ms-marco-MiniLM or Cohere
-        top-20 → top-5
-                   │
-                   ▼
-        LLM Generation (GPT-4o)
-        grounded answer + sources
-                   │
-                   ▼
-        FastAPI Response
-        + Redis cache
-        + Prometheus metrics
-        + Langfuse trace
-```
+> “Production‑grade hybrid RAG search system (dense + sparse + reranking) with FastAPI, Qdrant, Redis, and OpenAI.”
 
 ---
 
-## Stack
+## Features
 
-| Component | Technology |
-|---|---|
-| Vector DB | Qdrant (dense + sparse native) |
-| Dense embeddings | BAAI/bge-base-en-v1.5 (free, SOTA) |
-| Sparse search | BM25 (rank-bm25) |
-| Fusion | Reciprocal Rank Fusion |
-| Reranker | ms-marco-MiniLM-L-6-v2 / Cohere |
-| LLM | GPT-4o (configurable) |
-| Orchestration | LangGraph |
-| API | FastAPI + uvicorn |
-| Cache | Redis |
-| Observability | Prometheus + Grafana + Langfuse |
-| CI/CD | GitHub Actions |
-
----
-
-## Quick Start
-
-### 1. Clone and configure
-
-```bash
-git clone https://github.com/youruser/hybrid-rag
-cd hybrid-rag
-cp .env.example .env
-# Edit .env — set OPENAI_API_KEY and API_KEY at minimum
-```
-
-### 2. Start the stack
-
-```bash
-docker compose up -d
-# Qdrant:    http://localhost:6333
-# API:       http://localhost:8000
-# Grafana:   http://localhost:3000  (admin/admin)
-# Prometheus:http://localhost:9090
-```
-
-### 3. Ingest documents
-
-```bash
-# Ingest a PDF
-python scripts/cli.py ingest --file path/to/your/doc.pdf --source my_doc
-
-# Ingest a whole directory
-python scripts/cli.py ingest --dir ./data/docs/
-
-# Or via API
-curl -X POST http://localhost:8000/ingest \
-  -H "Authorization: Bearer your-secret-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"documents": ["Your document text here..."], "source_name": "test"}'
-```
-
-### 4. Query
-
-```bash
-# CLI
-python scripts/cli.py query "What is hybrid search?"
-
-# API
-curl -X POST http://localhost:8000/query \
-  -H "Authorization: Bearer your-secret-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is hybrid search?"}'
-```
-
-### 5. Check system status
-
-```bash
-python scripts/cli.py status
-```
+- **Hybrid search pipeline**
+  - Dense semantic search with `BAAI/bge-base-en-v1.5` embeddings.
+  - Sparse BM25‑style search with TF‑weighted sparse vectors.
+  - Reciprocal Rank Fusion (RRF) to combine dense + sparse results.
+  - Cross‑encoder reranking (local model or Cohere) to select top answers.
+- **RAG generation**
+  - Uses OpenAI Chat Completions (GPT‑4o by default) to generate grounded answers.
+  - Returns final answer plus ranked source snippets and timing metadata.
+- **Production API**
+  - FastAPI service with API‑key auth, rate limiting, and CORS.
+  - Typed request/response models using Pydantic.
+  - Health, metrics, and streaming response endpoints.
+- **Infrastructure & observability**
+  - Qdrant as vector database (dense + sparse collections).
+  - Redis for query result caching.
+  - Prometheus metrics and Langfuse traces for monitoring.
+  - Dockerized for local dev and cloud deployment (e.g. Cloud Run).
+- **Evaluation**
+  - Evaluation script to score RAG performance (faithfulness, relevancy, context quality).
+  - Config‑driven experiments via `.env` (chunk size, HyDE, weights, etc.).
 
 ---
 
-## API Reference
+## Architecture (high level)
 
-### `POST /query`
-
-```json
-{
-  "query": "What is hybrid search?",
-  "top_k": 5,
-  "use_hyde": true
-}
-```
-
-Response:
-```json
-{
-  "query": "What is hybrid search?",
-  "answer": "Hybrid search combines...",
-  "sources": [
-    {
-      "text": "...",
-      "source": "my_doc",
-      "rerank_score": 0.9821
-    }
-  ],
-  "latency_ms": 842.3,
-  "trace_id": "abc-123",
-  "cached": false
-}
-```
-
-### `POST /ingest`
-
-```json
-{
-  "documents": ["Full text of document..."],
-  "source_name": "my_knowledge_base",
-  "metadata": {"author": "John", "date": "2024-01"}
-}
-```
-
-### `POST /ingest/file`
-
-Upload a PDF or TXT file via multipart form.
-
-### `GET /health`
-
-Returns Qdrant and Redis health status.
-
-### `GET /metrics`
-
-Prometheus metrics endpoint.
+1. User sends a query to the FastAPI `/query` endpoint.
+2. LangGraph‑based pipeline routes the query to the RAG flow.
+3. Optional HyDE expansion generates a hypothetical answer to improve dense retrieval.
+4. Dense and sparse searches are executed against Qdrant, then fused via RRF.
+5. A cross‑encoder reranks the fused candidates to get the top‑N passages.
+6. An OpenAI model (e.g. GPT‑4o) generates an answer grounded in those passages.
+7. The service returns the answer, sources, latency breakdown, and a trace ID.
 
 ---
 
-## Evaluation
+## Tech Stack
 
-```bash
-# Run RAGAS evaluation on your golden dataset
-python scripts/cli.py eval --input data/eval_questions.json --output results/eval.json
-
-# Or directly
-python -m src.evaluate --input data/eval_questions.json
-```
-
-Output:
-```
-RAGAS RESULTS
-========================================
-  faithfulness           0.8921  █████████████████▉
-  answer_relevancy       0.8534  █████████████████
-  context_precision      0.7812  ███████████████▋
-  context_recall         0.7341  ██████████████▋
-```
-
-### Experiment tracking
-
-Change a config variable in `.env`, re-run eval, compare. Recommended experiments:
-
-| Variable | Values to try | Expected impact |
-|---|---|---|
-| `CHUNK_SIZE` | 256, 512, 1024 | Recall vs. precision tradeoff |
-| `HYDE_ENABLED` | true, false | Dense recall improvement |
-| `TOP_K_RETRIEVE` | 10, 20, 50 | Context coverage |
-| `USE_COHERE_RERANK` | false, true | Answer quality |
-| `DENSE_WEIGHT` | 0.4, 0.6, 0.8 | Domain keyword vs. semantic |
+- **Backend / API:** FastAPI, Uvicorn  
+- **Orchestration:** LangGraph  
+- **Vector DB:** Qdrant (dense + sparse vectors)  
+- **Embeddings:** SentenceTransformers – `BAAI/bge-base-en-v1.5`  
+- **Reranking:** CrossEncoder `ms-marco-MiniLM-L-6-v2` and optional Cohere rerank  
+- **LLM:** OpenAI Chat Completions (GPT‑4o by default, configurable)  
+- **Cache:** Redis  
+- **Config:** Pydantic Settings + `.env`  
+- **Observability:** Prometheus metrics, Langfuse tracing  
+- **Packaging:** Docker, `docker-compose`  
 
 ---
 
 ## Project Structure
 
-```
+```text
 hybrid-rag/
 ├── api/
-│   └── main.py              # FastAPI app — endpoints, auth, middleware
+│   └── main.py              # FastAPI app (routes, auth, rate limiting)
 ├── src/
-│   ├── ingestion.py         # Chunking, embedding, Qdrant upsert
-│   ├── retriever.py         # Dense + sparse + RRF fusion + HyDE
-│   ├── reranker.py          # Cross-encoder (local + Cohere)
-│   ├── graph.py             # LangGraph agent with query routing
+│   ├── ingestion.py         # Chunking, embeddings, Qdrant upsert
+│   ├── retriever.py         # Dense + sparse retrieval, RRF fusion, HyDE
+│   ├── reranker.py          # Cross-encoder / Cohere reranking
+│   ├── graph.py             # LangGraph RAG pipeline and routing
 │   ├── cache.py             # Redis caching layer
-│   ├── observability.py     # Prometheus metrics + Langfuse traces
-│   ├── evaluate.py          # RAGAS evaluation pipeline
-│   ├── models.py            # Pydantic request/response schemas
-│   └── logger.py            # Structured logging (structlog)
+│   ├── observability.py     # Prometheus metrics + Langfuse tracing
+│   ├── evaluate.py          # RAG evaluation utilities
+│   ├── models.py            # Pydantic data models
+│   └── logger.py            # Structured logging
 ├── config/
-│   └── settings.py          # Pydantic-settings config (reads .env)
-├── tests/
-│   └── test_rag.py          # Unit + integration tests
+│   └── settings.py          # Central config loaded from .env
 ├── scripts/
-│   └── cli.py               # Management CLI
-├── monitoring/
-│   ├── prometheus.yml        # Prometheus scrape config
-│   └── grafana-datasources.yml
-├── data/
-│   └── eval_questions.json  # Sample evaluation dataset
+│   └── cli.py               # (Optional) CLI helpers for ingest/query/eval
+├── monitoring/              # Prometheus / Grafana configs
 ├── docker/
-│   └── Dockerfile
-├── .github/
-│   └── workflows/ci.yml     # GitHub Actions CI/CD
-├── docker-compose.yml
+│   └── Dockerfile           # Production image (used for Cloud Run, etc.)
+├── tests/                   # Unit / integration tests
+├── docker-compose.yml       # Local dev stack (API + Qdrant + Redis, etc.)
 ├── requirements.txt
 └── .env.example
 ```
 
 ---
 
-## Production checklist
+## Local Development
 
-- [ ] Set `ENVIRONMENT=production` in `.env`
-- [ ] Set `USE_COHERE_RERANK=true` for best reranking quality
-- [ ] Configure `LANGFUSE_PUBLIC_KEY` for query tracing
-- [ ] Set up Grafana alerts on `rag_query_latency_seconds` p95
-- [ ] Run RAGAS eval after any config change (treat it as a regression test)
-- [ ] Set up Qdrant Cloud or self-hosted Qdrant with persistent volumes
-- [ ] Use Redis Sentinel or Redis Cluster for HA cache
+### 1. Clone and configure
+
+```bash
+git clone https://github.com/pradeek1120/vector-fusion-rag.git
+cd vector-fusion-rag
+
+cp .env.example .env
+# Edit .env and set at minimum:
+#   OPENAI_API_KEY
+#   QDRANT_URL (or use docker-compose default)
+#   REDIS_URL
+#   API_KEY (for protecting the API)
+```
+
+### 2. Run with Docker Compose
+
+```bash
+docker compose up -d
+
+# API:       http://localhost:8000
+# Qdrant:    http://localhost:6333
+# Prometheus/Grafana: as configured in monitoring/
+```
+
+### 3. Ingest documents
+
+```bash
+curl -X POST http://localhost:8000/ingest \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "documents": ["Your document text here..."],
+        "source_name": "local_docs"
+      }'
+```
+
+### 4. Ask questions
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "query": "What does this knowledge base contain?",
+        "top_k": 5,
+        "use_hyde": true
+      }'
+```
+
+The response includes:
+
+- `answer` – final LLM response grounded in retrieved documents.  
+- `sources` – list of source snippets with rerank scores.  
+- `latency_ms` and `trace_id` – useful for debugging and monitoring.  
 
 ---
 
-## Key concepts for interviews
+## Deployment (example: Google Cloud Run)
+
+The repository includes a production Dockerfile under `docker/Dockerfile`.  
+Typical steps to deploy to Cloud Run:
+
+1. Build and push the image to Artifact Registry:
+
+   ```bash
+   gcloud builds submit \
+     --tag REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/hybrid-rag-api \
+     --file docker/Dockerfile
+   ```
+
+2. Deploy the API:
+
+   ```bash
+   gcloud run deploy hybrid-rag-api \
+     --image REGION-docker.pkg.dev/PROJECT_ID/REPO_NAME/hybrid-rag-api \
+     --region REGION \
+     --platform managed \
+     --allow-unauthenticated \
+     --port 8000 \
+     --set-env-vars OPENAI_API_KEY=... \
+     --set-env-vars QDRANT_URL=...,REDIS_URL=...,API_KEY=...,ENVIRONMENT=production
+   ```
+
+3. Point your front‑end or tools at the Cloud Run URL (e.g. `https://hybrid-rag-api-xxxx.run.app/query`).
+
+---
+
+## What I Implemented
+
+This project demonstrates my ability to:
+
+- Design and implement a full hybrid RAG pipeline (dense + sparse + RRF + reranking).
+- Build a production‑style FastAPI service with authentication, rate limiting, and health checks.
+- Integrate external services (OpenAI, Qdrant, Redis, Langfuse, Prometheus).
+- Containerize and deploy the system using Docker and Cloud Run.
+- Evaluate and iterate on RAG quality using configurable experiments.
+
+Feel free to clone the repo, run it locally, and use it as a reference implementation of a modern production RAG system.
 
 **Why hybrid over dense-only?** Dense search fails on exact keyword queries (product codes, proper nouns). BM25 handles these. Hybrid gets both.
 
