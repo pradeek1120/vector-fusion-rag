@@ -1,0 +1,18 @@
+[
+  {
+    "question": "What is hybrid search in the context of RAG systems?",
+    "ground_truth": "Hybrid search combines dense vector search (semantic similarity via embeddings) with sparse BM25 keyword search, then fuses the results using Reciprocal Rank Fusion (RRF) to get the benefits of both approaches."
+  },
+  {
+    "question": "What is the purpose of a cross-encoder reranker?",
+    "ground_truth": "A cross-encoder reranker takes the query and each retrieved document together as a pair and scores their relevance jointly, capturing cross-attention signals that bi-encoders miss. It is used after retrieval to reorder the top results before sending them to the LLM."
+  },
+  {
+    "question": "What does HyDE stand for and why is it used?",
+    "ground_truth": "HyDE stands for Hypothetical Document Embeddings. Instead of embedding the raw query, the LLM generates a hypothetical ideal answer and that is embedded for dense retrieval, improving recall by bridging the semantic gap between short queries and longer documents."
+  },
+  {
+    "question": "How does Reciprocal Rank Fusion work?",
+    "ground_truth": "RRF assigns each document a fused score by summing weighted terms of the form weight/(k + rank) across all result lists. Only rank positions are used, not raw scores, making it robust to different scoring scales from dense and sparse retrievers."
+  }
+]
